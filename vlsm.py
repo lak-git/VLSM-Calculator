@@ -59,8 +59,15 @@ def main() -> None:
     # Tabulate using grid style
     table_text = tabulate(rows, headers=headers, tablefmt="grid")
 
-    # Print to CLI
-    print(table_text)
+    # Print to CLI in simple line format
+    print("\n--- VLSM Allocation ---\n")
+    for row in rows:
+        # row contains:
+        # [Name, Network, Broadcast, Usable Range, Subnet Mask, Wildcard Mask] (+ optional Wasted IPs)
+        name, network_str, broadcast_str, usable_range, subnet_mask, wildcard_mask = row[:6]
+
+        print(f"{name} | {network_str} | {broadcast_str} | {usable_range} | {subnet_mask} | {wildcard_mask} |")
+
 
     # Also write the table text to output.txt
     with open("output.txt", "w") as out_f:
