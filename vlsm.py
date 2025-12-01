@@ -1,204 +1,265 @@
-import math
+#!/usr/bin/env python3
+"""
+New vlsm.py
+
+Rewritten VLSM tool using Python's ipaddress module and tabulate for output.
+"""
+
+from __future__ import annotations
 import sys
-
-
-class Block():
-    def __init__(
-            self, val=0, max_val=255, is_network=False, transition=False, id=None
-                ) -> None:
-        self.val:int = val; self.max_val:int = max_val
-        self.is_network:bool = is_network; self.transition:bool = transition
-        self.id = id
-        self.jump_val = 0
-
-    def __str__(self) -> str:
-        return str(self.val)
-
-
-    def safe_add(self, nums:int) -> None:
-        if self.is_network:
-            return
-
-        elif self.transition:
-            if (self.val + nums) > self.max_val:
-                raise Exception(
-                    f'\n-LIMIT REACHED: Too many hosts to subnet-\
-                    \nSubnet requirement: {self.val + nums}\
-                    \nMAX number of hosts: {self.max_val}'
-                    )
-            self.val += nums
-
-
-
-class IP_Address():
-    def __init__(self, num_list, extra=False) -> None:
-        self.subnet = int(num_list[4])
-        split_number = self.subnet % 8
-        split_index = self.subnet // 8
-        binary_split = int('1' * split_number + '0' * (8 - split_number), 2)
-
-        block_list: list[Block] = []
-        for i in range(4):
-            if i < split_index:
-                block_list.append(
-                Block(val=num_list[i], max_val=num_list[i], is_network=True, id=i)
-                )
-            elif i == split_index:
-                block_list.append(
-                Block(val=num_list[i], max_val=((256-binary_split)+num_list[i]), transition=True, id=i)
-                )
-            else:
-                block_list.append(Block(val=num_list[i], id=i))
-
-        self.block_list = list(reversed(block_list))
-        self.ip_list: list[str] = []
-        self.info_list: list = []
-        self.extra_info: bool = extra
-
-
-    def add_numbers(self, nums:int) -> None:
-        exp: int = math.ceil(math.log2(nums)); subnet_mask: int = 32-exp; number: int = 2**exp
-        jump_value: int = 0
-        binary: str = '1'*subnet_mask + '0'*(32-subnet_mask)
-        sm_value: int = int(binary[24:],2)
-        previous: str = f'\
-{self.block_list[3]}.{self.block_list[2]}.{self.block_list[1]}.{self.block_list[0]}/{subnet_mask}, SM: {sm_value}, WM: {255-sm_value}'
-
-        if self.extra_info:
-            self.info_list.append(number - nums)
-
-        for ip_Block in self.block_list:
-            max_value = ip_Block.max_val + 1  
-            if not ip_Block.is_network and not ip_Block.transition:
-                ip_Block.val += number % max_value
-                if ip_Block.val >= max_value:
-                    ip_Block.val %= max_value
-                    jump_value += 1
-
-                jump_value += number // max_value
-            #8bit case
-            elif not ip_Block.is_network and ip_Block.transition and ip_Block.id == 3:
-               ip_Block.safe_add(number % max_value)
-            else:
-                ip_Block.safe_add(jump_value)
-                jump_value = ip_Block.jump_val
-
-        self.ip_list.append(previous)
-
-
-    def get_ips(self):
-        return self.ip_list
-
+import ipaddress
+from typing import List, Tuple, Optional
+from tabulate import tabulate
 
 
 def main() -> None:
-    input_ipa: str = ''; requirements: list[str] = []
-    extra: bool|str|None = None
-    
-    inpt_file = get_file()
-    if inpt_file is not None:
-        input_ipa, requirements, extra = read_requirements(inpt_file)
+    # parse args (simple: optional single input file)
+    args = sys.argv[1:]
+    if len(args) > 1:
+        sys.exit("Usage: vlsm.py <optional_input_file.txt>")
+
+    if len(args) == 1:
+        infile = args[0]
+        if not (infile.endswith(".txt") or infile.endswith(".text")):
+            sys.exit("Input file must be a .txt or .text file")
+        base_str, requirements, extra_info = read_requirements_from_file(infile)
     else:
-        input_ipa = input('Enter IPv4 Address: ')
-        print('Enter requirement in format, Name|Number')
-        while True:
-            prompt = input('(x to stop): ')
-            if prompt.lower() == 'x':
-                break
-            requirements.append(prompt)
+        base_str, requirements, extra_info = interactive_input()
 
-    address_blocks, req_numbers_list, names_list = process_input(input_ipa, requirements)
+    # Validate base network
+    try:
+        base_network = ipaddress.IPv4Network(base_str.strip(), strict=False)
+    except Exception as e:
+        sys.exit(f"Invalid base network: {e}")
 
-    ip_address = IP_Address(address_blocks, extra)
-    for i in req_numbers_list: ip_address.add_numbers(i)
-    
-    output_ipas(ip_address, names=names_list, filename='output.txt')
+    if not requirements:
+        sys.exit("No requirements provided. Exiting.")
+
+    # Validate requirement entries
+    for name, num in requirements:
+        if num < 1:
+            sys.exit(f"Requirement for '{name}' must be >= 1 usable host.")
+
+    # Allocate
+    try:
+        allocations = allocate_vlsm(base_network, requirements)
+    except ValueError as e:
+        sys.exit(f"Allocation error: {e}")
+
+    # Prepare table headers
+    headers = ["Name", "Network", "Broadcast", "Usable Range", "Subnet Mask", "Wildcard Mask"]
+    if extra_info:
+        headers.append("Wasted IPs")
+
+    # Prepare rows in the order allocated (descending-by-size)
+    rows = []
+    for name, required, net, wasted in allocations:
+        rows.append(format_allocation_row(name, required, net, wasted, extra_info))
+
+    # Tabulate using grid style
+    table_text = tabulate(rows, headers=headers, tablefmt="grid")
+
+    # Print to CLI
+    print(table_text)
+
+    # Also write the table text to output.txt
+    with open("output.txt", "w") as out_f:
+        out_f.write(table_text + "\n")
+
+    # Exit normally
+    return
 
 
-def read_requirements(filename:str) -> tuple[str, list[str], bool|str]:
-    input_ip: str = ''; extra_info:bool | str = False
-    with open(filename, 'r') as file:
-        definition_line = file.readline()
-        try:
-            input_ip , extra_info = definition_line.split('|')
-            statement = extra_info.lower().strip()
-        except ValueError:
-            input_ip = definition_line
-        else:
-            if statement == 'true':
+def prefix_for_usable(required_usable: int) -> int:
+    """
+    Given required usable hosts, return the smallest prefix length that
+    provides >= required_usable usable hosts.
+
+    Uses typical usable-host calculation: usable = 2^host_bits - 2 (so /30 => 2 usable).
+    We avoid /31 and /32 as usable-host subnets (they have 0 usable hosts under the
+    traditional allocation approach).
+    """
+    if required_usable <= 0:
+        raise ValueError("Required usable hosts must be >= 1")
+
+    # host_bits ranges from 2 (for /30) up to 30 (for /2)
+    for host_bits in range(2, 31):  # host_bits = 32 - prefixlen
+        usable = (1 << host_bits) - 2
+        if usable >= required_usable:
+            return 32 - host_bits
+
+    raise ValueError("Requirement too large to fit in IPv4")
+
+
+def read_requirements_from_file(filename: str) -> Tuple[str, List[Tuple[str, int]], bool]:
+    """
+    Read file input. Expected format:
+      - First line: <base_network> or <base_network>|True|False  (extra info boolean optional)
+      - Following lines: Name|Number  (Number is usable hosts)
+
+    Returns:
+      (base_network_str, [(name, usable_hosts), ...], extra_info_flag)
+    """
+    extra_info = False
+    requirements: List[Tuple[str, int]] = []
+
+    with open(filename, "r") as fh:
+        first = fh.readline().strip()
+        if "|" in first:
+            parts = first.split("|", 1)
+            base = parts[0].strip()
+            statement = parts[1].strip().lower()
+            if statement == "true":
                 extra_info = True
-            elif statement != 'false':
-                raise Exception('Not a valid statement for extra info')
-        finally:
-            requirements: list[str] = file.readlines()
-            requirements = [req.rstrip('\n') for req in requirements]
-
-    return input_ip, requirements, extra_info
-
-
-def process_input(input_ipa, requirements:list[str]) -> tuple[list[str], list[int], list[str]]:
-    address_blocks = input_ipa.split('.')
-    last_octate, mask = address_blocks.pop().split('/')
-    address_blocks.append(last_octate); address_blocks.append(mask)
-
-    address_blocks = [int(i) for i in address_blocks]
-
-    numbers_list: list[int] = []; names_list: list[str] = []
-    for entry in requirements:
-        name, number = entry.split('|')
-        names_list.append(name); numbers_list.append(int(number))
-
-    return address_blocks, numbers_list, names_list
-
-
-def get_file() -> str | None:
-    arg: list[str] = sys.argv
-    if len(arg) > 2:
-        sys.exit('Give only maximum of 2 input files')
-
-    elif len(arg) == 2:
-        if arg[1].endswith('.txt') or arg[1].endswith('.text'):
-            return arg[1]
+            elif statement == "false" or statement == "":
+                extra_info = False
+            else:
+                raise ValueError("Invalid extra-info flag in file (use True or False)")
         else:
-            sys.exit('Enter a valid text file')
+            base = first
 
+        # read the rest
+        for raw in fh:
+            line = raw.strip()
+            if not line:
+                continue
+            if "|" not in line:
+                raise ValueError(f"Invalid requirement line (expected 'Name|Number'): {line}")
+            name, num = line.split("|", 1)
+            requirements.append((name.strip(), int(num.strip())))
+
+    return base, requirements, extra_info
+
+
+def interactive_input() -> Tuple[str, List[Tuple[str, int]], bool]:
+    """
+    Prompt the user for base network and requirements interactively.
+    """
+    base = input("Enter IPv4 network (e.g., 192.168.1.0/24): ").strip()
+    print("Enter requirements in format: Name|Number (Number = usable hosts). Enter 'x' to stop.")
+    reqs: List[Tuple[str, int]] = []
+    while True:
+        line = input("(x to stop): ").strip()
+        if line.lower() == "x":
+            break
+        if "|" not in line:
+            print("Invalid format. Use Name|Number.")
+            continue
+        name, num = line.split("|", 1)
+        try:
+            reqs.append((name.strip(), int(num.strip())))
+        except ValueError:
+            print("Number must be an integer.")
+    return base, reqs, False
+
+
+def next_aligned_network_start(current_int: int, prefixlen: int) -> int:
+    """
+    For a candidate current address (as int) and desired prefixlen,
+    return the integer of the next network address that is aligned to that prefix
+    and is >= current_int.
+
+    Example:
+      - prefixlen = 26 -> host_bits = 6 -> block_size = 64
+      - If current_int falls in the middle of a /26 block, this will return the start of the next /26 block.
+    """
+    host_bits = 32 - prefixlen
+    block_size = 1 << host_bits
+    # aligned base for the current_int
+    aligned = current_int & (~(block_size - 1))
+    if aligned < current_int:
+        aligned += block_size
+    return aligned
+
+
+def allocate_vlsm(base_network: ipaddress.IPv4Network,
+                  requirements: List[Tuple[str, int]]) -> List[Tuple[str, int, ipaddress.IPv4Network, int]]:
+    """
+    Allocate subnets for requirements using VLSM.
+
+    Returns a list of tuples:
+      (name, required_usable, allocated_network, wasted_ips)
+    where wasted_ips = allocated_usable - required_usable
+    """
+    # Attach original index so we can output in allocation order (we'll present sorted order allocations)
+    reqs_with_index = [(name, required, idx) for idx, (name, required) in enumerate(requirements)]
+
+    # Sort descending by required hosts (Option B)
+    reqs_with_index.sort(key=lambda t: t[1], reverse=True)
+
+    allocations = []
+    current_int = int(base_network.network_address)
+
+    for name, required_usable, orig_idx in reqs_with_index:
+        prefixlen = prefix_for_usable(required_usable)
+        # Find the next aligned network at this prefix >= current_int
+        net_start_int = next_aligned_network_start(current_int, prefixlen)
+
+        # Create the network object
+        net = ipaddress.IPv4Network((net_start_int, prefixlen))
+        # Ensure the allocated net fits inside the base network
+        if net.network_address < base_network.network_address or net.broadcast_address > base_network.broadcast_address:
+            raise ValueError(f"Not enough address space in base network to allocate '{name}' ({required_usable} hosts).")
+
+        # compute allocated usable hosts for this net (special-case /31,/32)
+        host_bits = 32 - net.prefixlen
+        if host_bits >= 2:
+            allocated_usable = (1 << host_bits) - 2
+        else:
+            allocated_usable = 0
+
+        wasted = allocated_usable - required_usable if allocated_usable >= required_usable else 0
+
+        allocations.append((name, required_usable, net, wasted))
+
+        # move current_int to next IP after this allocated network
+        current_int = int(net.broadcast_address) + 1
+        # If we've run out of addresses for further allocations, further iterations will fail above.
+
+    return allocations
+
+
+def wildcard_from_netmask(netmask: ipaddress.IPv4Address) -> ipaddress.IPv4Address:
+    """
+    Compute wildcard mask (host bits set to 1), which is bitwise NOT of netmask.
+    """
+    nm_int = int(netmask)
+    wild_int = (~nm_int) & 0xFFFFFFFF
+    return ipaddress.IPv4Address(wild_int)
+
+
+def format_allocation_row(name: str, required: int, net: ipaddress.IPv4Network, wasted: int, extra_info: bool) -> List[str]:
+    """
+    Prepare a display row for the tabular output. Columns:
+      - Name
+      - Network (with prefix)
+      - Broadcast
+      - Usable Host Range
+      - Subnet Mask (dotted)
+      - Wildcard Mask (dotted)
+      - Wasted IPs (optional)
+    """
+    network_str = f"{net.network_address}/{net.prefixlen}"
+    broadcast_str = str(net.broadcast_address)
+
+    # usable host range:
+    host_bits = 32 - net.prefixlen
+    if host_bits >= 2:
+        first_usable = ipaddress.IPv4Address(int(net.network_address) + 1)
+        last_usable = ipaddress.IPv4Address(int(net.broadcast_address) - 1)
+        usable_range = f"{first_usable} - {last_usable}"
     else:
-        return None
-    
+        # /31 and /32: no usable hosts under classic approach
+        usable_range = "N/A"
 
-def output_ipas(ipa:IP_Address, names:list[str], filename:str) -> None:
-    output = []
-    for i, ip in enumerate(ipa.get_ips()):
-        output.append(f'{ip}, {names[i]}')
-        if ipa.extra_info:
-            output.append(f' | Number of Wasted IPs: {ipa.info_list[i]}')
-        else:
-            output.append(' ')
+    subnet_mask = str(net.netmask)
+    wildcard = str(wildcard_from_netmask(net.netmask))
 
-    for i in range(len(output)): print(output[i])
-    with open(f'{filename}', 'w') as file:
-        for i in range(len(output)): file.write(f'{output[i]}\n')
-    
+    row = [name, network_str, broadcast_str, usable_range, subnet_mask, wildcard]
+    if extra_info:
+        row.append(str(wasted))
+    return row
 
-if __name__ == '__main__':
-    '''
-    --Test inputs--
-    '''
-    # ip_test1 = '192.248.0.0/23'
-    # req_test3 = [
-    #     'Computing|9','HR|5',
-    #     'Finance|5','Business|6',
-    #     'NCUK|5', 'WAN1|4','WAN2|4'
-    #     ]
-    # ip_test2 = '192.192.128.0/19'
-    # req_test2 = ['Computing|503','Business|203','Law|43',
-    #              'HR|43','Marketing|43','Finance|43',
-    #              'Maintenance|5','WAN1|4', 'WAN2|4'
-    # ]
-    # ip_test3 = '192.168.192.0/19'
-    # req_test3 = ['Computing|253','Business|123','Law|53',
-    #              'Marketing|23','Finance|7',
-    #              'HR|7','Cyber|7', 'WAN|4'
-    # ]
 
+if __name__ == "__main__":
     main()
