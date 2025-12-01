@@ -1,16 +1,18 @@
-148.94.10.0/24, SM: 0, WM: 255, Computing
+148.94.0.0/30, SM: 252, WM: 3, Core1 - Core2 Link
  
-148.94.11.0/25, SM: 128, WM: 127, Business
+148.94.0.4/30, SM: 252, WM: 3, Core1 - STANDBY Link
  
-148.94.11.128/27, SM: 224, WM: 31, Marketing
+148.94.0.8/30, SM: 252, WM: 3, Core2 - STANDBY Link
  
-148.94.11.160/27, SM: 224, WM: 31, HR
+148.94.0.12/30, SM: 252, WM: 3, HQ1 - Core1 Link
  
-148.94.11.192/28, SM: 240, WM: 15, Academic Admin
+148.94.0.16/30, SM: 252, WM: 3, HQ1 - STANDBY Link
  
-148.94.11.208/30, SM: 252, WM: 3, HQ1 - Core1 Link
+148.94.0.20/30, SM: 252, WM: 3, RnD1 - STANDBY Link
  
-148.94.11.212/30, SM: 252, WM: 3, HQ2 - Core1 Link
+148.94.0.24/30, SM: 252, WM: 3, RnD1 - Core2 Link
  
-148.94.11.216/30, SM: 252, WM: 3, HQ2 - STANDBY Link
+148.94.0.28/30, SM: 252, WM: 3, Core2 - KANDY1 Link
+ 
+148.94.0.32/30, SM: 252, WM: 3, CE Link
  

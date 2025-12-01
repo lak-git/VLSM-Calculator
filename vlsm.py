@@ -2,7 +2,6 @@ import math
 import sys
 
 
-
 class Block():
     def __init__(
             self, val=0, max_val=255, is_network=False, transition=False, id=None
@@ -182,6 +181,9 @@ def output_ipas(ipa:IP_Address, names:list[str], filename:str) -> None:
     
 
 if __name__ == '__main__':
+    '''
+    --Test inputs--
+    '''
     # ip_test1 = '192.248.0.0/23'
     # req_test3 = [
     #     'Computing|9','HR|5',

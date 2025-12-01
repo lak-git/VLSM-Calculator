@@ -1,9 +1,0 @@
-148.94.0.0/28
-Core1 - Core2 Link|4
-Core1 - STANDBY Link|4
-Core2 - STANDBY Link|4
-HQ1 - Core1 Link|4
-HQ1 - STANDBY Link|4
-RnD1 - STANDBY Link|4
-RnD1 - Core2 Link|4
-Core2 - KANDY1 Radio Link|4

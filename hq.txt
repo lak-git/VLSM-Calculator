@@ -1,8 +1,0 @@
-148.94.10.0/23
-Computing|203
-Business|103
-Marketing|23
-HR|23
-Academic Admin|11
-HQ Inter Link 1|4
-HQ Inter Link 2|4
